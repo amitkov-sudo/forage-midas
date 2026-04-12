@@ -2,15 +2,22 @@
 
 ## What it does
 
-**Midas Core** is a Spring Boot service for a simple **ledger**:
+**Midas Core** is a Spring Boot **ledger** demo backed by **H2** and **Kafka**.
 
-1. **Users** — Stored in **H2** via JPA (`UserRecord`: generated id, name, **balance**). The application layer saves rows through `DatabaseConduit` → `UserRepository`.
+1. **Users** — JPA entity **`UserRecord`** (id, name, balance). Rows are saved via **`DatabaseConduit`** / **`UserRepository`** (tests also use **`UserPopulator`** from fixtures).
 
-2. **Transfers** — A **transaction** is a transfer instruction: **sender user id**, **recipient user id**, and **amount** (`Transaction`, JSON-friendly). In the integration setup, line-oriented test fixtures are parsed into `Transaction` instances and published to a Kafka topic (config key `general.kafka-topic`, default name **`trader-updates`**). A **`@KafkaListener`** consumes those messages (in **`src/test`**, the handler currently logs each `Transaction`).
+2. **Inbound transfers (Kafka)** — Messages deserialize to **`foundation.Transaction`** (sender id, recipient id, amount) on topic **`trader-updates`** (`general.kafka-topic` in config).
 
-3. **Balance reads** — **`Balance`** is the DTO for a user’s balance amount. The test helper **`BalanceQuerier`** performs `GET http://localhost:33400/balance?userId={id}` and deserializes the response as `Balance`. That implies the running app is expected to serve that contract when those tests are used with **`WebEnvironment.DEFINED_PORT`** and matching `server.port`.
+3. **Consumer (test scope)** — **`KafkaTransactionListener`** in **`src/test`** is a **`@KafkaListener`** wired to **`UserRepository`** and **`TransactionRecordRepository`**. For each message it:
+   - resolves sender and recipient by id;
+   - **discards** the message (no DB writes) if either user is missing or the sender’s balance is below the amount;
+   - otherwise **debits/credits** balances, **`save`s** both users, and **`save`s** a **`TransactionRecord`** (`@ManyToOne` to sender and recipient) inside **`@Transactional`**.
 
-**Scope in this tree:** `src/main` holds persistence, shared DTOs, and Kafka **configuration**. The **`@KafkaListener`**, **`KafkaTemplate`** producer, and **`RestTemplate`** balance client live under **`src/test`** as the integration harness—not as shipped production controllers/listeners in `src/main`.
+4. **Persistence model** — **`entity.TransactionRecord`** maps to table **`ledger_transaction`**. The Kafka DTO **`Transaction`** is not an entity; persisted history uses **`TransactionRecord`** only.
+
+5. **Balance over HTTP (later tasks)** — **`Balance`** is the JSON shape for balance reads; **`BalanceQuerier`** calls `GET http://localhost:33400/balance?userId={id}` when **`TaskFiveTests`** runs with a defined port.
+
+**Split:** `src/main` holds entities, repositories, DTOs, and Kafka **configuration**. The **Kafka consumer implementation** and **`KafkaTemplate`** producer live under **`src/test`** with the task tests.
 
 ---
 
@@ -32,14 +39,15 @@
 
 | Location | Role |
 |----------|------|
-| `src/main/java/.../entity`, `repository`, `component` | `UserRecord`, `UserRepository`, `DatabaseConduit` |
+| `src/main/java/.../entity` | `UserRecord`, `TransactionRecord` |
+| `src/main/java/.../repository` | `UserRepository`, `TransactionRecordRepository` |
+| `src/main/java/.../component` | `DatabaseConduit` |
 | `src/main/java/.../foundation` | `Transaction`, `Balance` |
-| `src/main/java/.../MidasCoreApplication.java` | Bootstrap |
-| `src/test/java/...` | `KafkaProducer`, `KafkaTransactionListener`, `UserPopulator`, `FileLoader`, `BalanceQuerier`, integration tests (`TaskOneTests`–`TaskFiveTests`) |
-| `src/test/resources/test_data/` | User and transaction line files for tests |
-| `application.yml` | Kafka serializers/deserializers, consumer group `midas-group`, trusted JSON package `com.jpmc.midascore.foundation`, default `Transaction` type for deserialization |
+| `src/main/resources/application.yml` | Kafka serializers, consumer group `midas-group`, JSON trusted package / default type for `Transaction` |
+| `src/test/java/...` | `KafkaProducer`, `KafkaTransactionListener`, `UserPopulator`, `FileLoader`, `BalanceQuerier`, `TaskOneTests`–`TaskFiveTests` |
+| `src/test/resources/test_data/` | User and transaction line files |
 
-Producer: `StringSerializer` + `JsonSerializer` for values. Consumer: `StringDeserializer` + `JsonDeserializer` with the settings above.
+Producer: `StringSerializer` + `JsonSerializer`. Consumer: `StringDeserializer` + `JsonDeserializer` for `Transaction` values.
 
 ---
 
@@ -52,10 +60,17 @@ Producer: `StringSerializer` + `JsonSerializer` for values. Consumer: `StringDes
 
 Windows: `mvnw.cmd` instead of `./mvnw`.
 
-Single test class:
+Single test class (example):
 
 ```bash
 ./mvnw -Dtest=TaskOneTests test
+./mvnw -Dtest=TaskThreeTests test
 ```
 
-Some Kafka-backed test classes use **`@EmbeddedKafka`** and **infinite loops** after setup; they are meant for interactive debugging, not unattended full-suite runs.
+**Task tests:** Several use **`@EmbeddedKafka`**. **`TaskTwoTests`–`TaskFourTests`** enter an **infinite loop** after setup so you can **debug** (e.g. breakpoints in **`KafkaTransactionListener.listen`**, inspect **`UserRepository`** / **`TransactionRecordRepository`**). Stop the run from the IDE when finished. **`mvn test`** without filtering is not a good fit for CI on this project.
+
+---
+
+## Debugging Task Three
+
+After **`UserPopulator`** runs, user ids in transaction files match persisted **`UserRecord`** ids (insert order). Use the debugger on **`listen`** to step through validation, balance updates, and **`TransactionRecord`** persistence; console lines summarize **received**, **discarded**, or **recorded** rows.
