@@ -21,6 +21,8 @@ public class TransactionRecord {
     @Column(nullable = false)
     private float amount;
 
+    private float incentive;
+
     protected TransactionRecord() {
     }
 
@@ -28,6 +30,13 @@ public class TransactionRecord {
         this.sender = sender;
         this.recipient = recipient;
         this.amount = amount;
+    }
+
+    public TransactionRecord(UserRecord sender, UserRecord recipient, float amount, float incentive) {
+        this.sender = sender;
+        this.recipient = recipient;
+        this.amount = amount;
+        this.incentive = incentive;
     }
 
     public Long getId() {
@@ -46,26 +55,31 @@ public class TransactionRecord {
         return amount;
     }
 
-    /** Sender display name (for logs / debugger). */
     public String getSenderName() {
         return sender != null ? sender.getName() : null;
     }
 
-    /** Recipient display name (for logs / debugger). */
     public String getRecipientName() {
         return recipient != null ? recipient.getName() : null;
     }
 
-    /**
-     * Human-readable line: both account names and the transfer amount (the persisted transaction).
-     */
+    public float getIncentive() {
+        return incentive;
+    }
+
+    public void setIncentive(float incentive) {
+        this.incentive = incentive;
+    }
+
     @Override
     public String toString() {
         return String.format(
-                "TransactionRecord{id=%s, senderName='%s', recipientName='%s', transaction{amount=%f}}",
+                "TransactionRecord{id=%s, senderName='%s', recipientName='%s', amount=%f, incentive=%f}",
                 id,
                 getSenderName(),
                 getRecipientName(),
-                amount);
+                amount,
+                incentive
+        );
     }
 }

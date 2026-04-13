@@ -1,11 +1,15 @@
 package com.jpmc.midascore.foundation;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Transaction {
+    @JsonProperty("senderId")
     private long senderId;
+    @JsonProperty("recipientId")
     private long recipientId;
+    @JsonProperty("amount")
     private float amount;
 
     public Transaction() {
